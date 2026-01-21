@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <title>Valorant Bot Training - Final Fix</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #87ceeb; font-family: sans-serif; }
+        #crosshair {
+            position: absolute; top: 50%; left: 50%; width: 12px; height: 12px;
+            border: 2px solid #0f0; transform: translate(-50%, -50%); pointer-events: none; z-index: 10;
+        }
+        #ui {
+            position: absolute; top: 20px; left: 20px; color: #fff;
+            background: rgba(0,0,0,0.7); padding: 15px; border-radius: 5px; pointer-events: none;
+        }
+        #overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.5); display: flex; justify-content: center;
+            align-items: center; color: white; font-size: 24px; font-weight: bold; z-index: 100;
+        }
+        #settings {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            width: 300px; background: #1f2326; color: white; padding: 20px;
+            border-radius: 5px; display: none; z-index: 101; border-top: 4px solid #ff4655;
+        }
+        .item { margin-bottom: 15px; }
+        input[type="range"] { width: 100%; accent-color: #ff4655; }
+        #msg {
+            position: absolute; top: 20%; left: 50%; transform: translateX(-50%);
+            color: #ffff00; font-size: 40px; font-weight: bold; display: none; text-shadow: 2px 2px #000;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="overlay">NHẤN CHUỘT ĐỂ BẮT ĐẦU</div>
+    <div id="crosshair"></div>
+    <div id="msg">HEADSHOT!</div>
+    
+    <div id="ui">
+        <b>MID TRAINING</b><br>
+        Kills: <span id="killCount">0</span> | ESC: Cài đặt
+    </div>
+
+    <div id="settings">
+        <h3 style="color:#ff4655; margin-top:0">CÀI ĐẶT</h3>
+        <div class="item">
+            <label>Độ nhạy: <span id="sVal">2.0</span></label>
+            <input type="range" id="sIn" min="0.5" max="5" step="0.1" value="2">
+        </div>
+        <div class="item">
+            <label>Âm lượng: <span id="vVal">50</span>%</label>
+            <input type="range" id="vIn" min="0" max="100" value="50">
+        </div>
+        <button id="closeBtn" style="width:100%; padding:10px; background:#ff4655; color:white; border:none; cursor:pointer;">QUAY LẠI</button>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.0/three.min.js"></script>
+
+    <script>
+        // --- CẤU HÌNH ---
+        let sensitivity = 0.002;
+        let volume = 0.5;
+        let kills = 0;
+        let botHP = 100;
+
+        // --- KHỞI TẠO THREE.JS ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x87ceeb);
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+        const light = new THREE.DirectionalLight(0xffffff, 1);
+        light.position.set(10, 20, 10);
+        scene.add(light);
+
+        // --- ÂM THANH ---
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        function playSfx(f, t, d) {
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            const o = audioCtx.createOscillator();
+            const g = audioCtx.createGain();
+            o.type = t; o.frequency.value = f;
+            g.gain.setValueAtTime(0.1 * volume, audioCtx.currentTime);
+            g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + d);
+            o.connect(g); g.connect(audioCtx.destination);
+            o.start(); o.stop(audioCtx.currentTime + d);
+        }
+
+        // --- MAP & BOT ---
+        const floor = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), new THREE.MeshStandardMaterial({ color: 0x333333 }));
+        floor.rotation.x = -Math.PI/2;
+        scene.add(floor);
+
+        const wallMat = new THREE.MeshStandardMaterial({ color: 0xe2725b });
+        const leftWall = new THREE.Mesh(new THREE.BoxGeometry(2, 10, 60), wallMat);
+        leftWall.position.set(-15, 5, 0);
+        const rightWall = new THREE.Mesh(new THREE.BoxGeometry(2, 10, 60), wallMat);
+        rightWall.position.set(15, 5, 0);
+        scene.add(leftWall, rightWall);
+
+        let bot = new THREE.Group();
+        function spawnBot() {
+            scene.remove(bot);
+            bot = new THREE.Group();
+            const head = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.5), new THREE.MeshStandardMaterial({color: 0xff0000}));
+            head.position.y = 2.7; head.userData.part = 'head';
+            const body = new THREE.Mesh(new THREE.BoxGeometry(0.8, 1.3, 0.5), new THREE.MeshStandardMaterial({color: 0x222222}));
+            body.position.y = 1.8; body.userData.part = 'body';
+            const legs = new THREE.Mesh(new THREE.BoxGeometry(0.7, 1.1, 0.4), new THREE.MeshStandardMaterial({color: 0x000000}));
+            legs.position.y = 0.6; legs.userData.part = 'legs';
+            bot.add(head, body, legs);
+            bot.position.set(Math.random() * 20 - 10, 0, Math.random() * 30 - 15);
+            scene.add(bot);
+            playSfx(440, 'sine', 0.2); // Tiếng bot xuất hiện
+        }
+        spawnBot();
+
+        // --- ĐIỀU KHIỂN ---
+        const raycaster = new THREE.Raycaster();
+        const overlay = document.getElementById('overlay');
+        const setMenu = document.getElementById('settings');
+
+        document.addEventListener('mousedown', () => {
+            if (document.pointerLockElement !== renderer.domElement) {
+                renderer.domElement.requestPointerLock();
+                return;
+            }
+            // Bắn súng
+            playSfx(100, 'sawtooth', 0.1);
+            raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+            const hits = raycaster.intersectObjects(bot.children);
+            if (hits.length > 0) {
+                const part = hits[0].object.userData.part;
+                if (part === 'head') {
+                    botHP -= 100;
+                    document.getElementById('msg').style.display = 'block';
+                    setTimeout(() => document.getElementById('msg').style.display = 'none', 500);
+                    playSfx(1000, 'sine', 0.1);
+                } else if (part === 'body') botHP -= 25;
+                else if (part === 'legs') botHP -= 20;
+
+                if (botHP <= 0) {
+                    kills++;
+                    document.getElementById('killCount').innerText = kills;
+                    botHP = 100;
+                    spawnBot();
+                }
+            }
+        });
+
+        document.addEventListener('pointerlockchange', () => {
+            const locked = document.pointerLockElement === renderer.domElement;
+            overlay.style.display = locked ? 'none' : 'flex';
+            setMenu.style.display = locked ? 'none' : 'block';
+        });
+
+        // Xử lý cài đặt
+        document.getElementById('sIn').oninput = (e) => {
+            sensitivity = e.target.value * 0.001;
+            document.getElementById('sVal').innerText = e.target.value;
+        };
+        document.getElementById('vIn').oninput = (e) => {
+            volume = e.target.value / 100;
+            document.getElementById('vVal').innerText = e.target.value;
+        };
+        document.getElementById('closeBtn').onclick = () => renderer.domElement.requestPointerLock();
+
+        // Di chuyển và Camera
+        let keys = {};
+        window.onkeydown = (e) => keys[e.code] = true;
+        window.onkeyup = (e) => keys[e.code] = false;
+        window.onmousemove = (e) => {
+            if (document.pointerLockElement === renderer.domElement) {
+                camera.rotation.y -= e.movementX * sensitivity;
+                camera.rotation.x -= e.movementY * sensitivity;
+                camera.rotation.x = Math.max(-Math.PI/2, Math.min(Math.PI/2, camera.rotation.x));
+            }
+        };
+
+        camera.position.set(0, 1.8, 20);
+        camera.rotation.order = 'YXZ';
+
+        function animate() {
+            requestAnimationFrame(animate);
+            if (document.pointerLockElement === renderer.domElement) {
+                const speed = 0.15;
+                if (keys['KeyW']) camera.translateZ(-speed);
+                if (keys['KeyS']) camera.translateZ(speed);
+                if (keys['KeyA']) camera.translateX(-speed);
+                if (keys['KeyD']) camera.translateX(speed);
+                camera.position.y = 1.8;
+            }
+            renderer.render(scene, camera);
+        }
+        animate();
+    </script>
+</body>
+</html>
